@@ -2,10 +2,11 @@ name: Python Exporter CI
 
 on:
   pull_request:
-    paths: ['exporter/**']
+    paths:
+      - 'exporter/**'
   push:
-    branches: [main]
-    paths: ['exporter/**']
+    branches:
+      - main
 
 jobs:
   test:
@@ -15,18 +16,28 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      - run: pip install -r exporter/requirements.txt
-      - run: pytest exporter/tests/ -v --tb=short
-        working-directory: .
-      - run: pip install ruff && ruff check exporter/ --select E,F,W --ignore E501
-      - name: Bandit security scan
-        uses: PyCQA/bandit-action@v1
-        with:
-          targets: exporter/
-          level: medium
-          confidence: medium
+
+      - name: Install test dependencies
+        run: pip install -r exporter/ci-requirements.txt
+
+      - name: Run pytest
+        working-directory: exporter
+        run: pytest tests/ -v --tb=short
+
+      - name: Lint with ruff
+        run: |
+          pip install ruff
+          ruff check exporter/ --select E,F,W --ignore E501
+
+      - name: Security scan with bandit
+        run: |
+          pip install bandit
+          bandit -r exporter/ -ll -ii --exclude exporter/tests

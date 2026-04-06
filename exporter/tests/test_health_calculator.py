@@ -6,6 +6,8 @@
   3. All services down returns 0
   4. High latency alone triggers latency weight
   5. breach_reason is populated when score drops below 80
+
+All tests are fully self-contained — no AWS calls, no boto3 imports.
 """
 
 import sys
@@ -65,8 +67,6 @@ class TestOneDegradedServiceLowersScore:
                 "error_rate": 0.0,
             },
         })
-        # checkin-svc availability = 0, contributes 0 * 0.5 = 0 for avail component
-        # Fleet score = (100 + 100 + 50) / 3 = 83.33
         assert result.score < 100.0
         assert "checkin-svc" in result.degraded_services
         assert len(result.degraded_services) == 1
@@ -75,7 +75,7 @@ class TestOneDegradedServiceLowersScore:
         result = calc.calculate_score({
             "slow-svc": {
                 "healthy": True,
-                "latency_p99_ms": 800.0,  # over SLO
+                "latency_p99_ms": 800.0,
                 "error_rate": 0.0,
             },
         })
@@ -100,9 +100,6 @@ class TestHighLatencyAloneTriggersLatencyWeight:
     """Test 4: service is healthy and error-free but latency exceeds SLO."""
 
     def test_high_latency_reduces_score(self):
-        # 1000ms = 2x the 500ms SLO → latency_score = 0
-        # availability=100, latency=0, error=100
-        # weighted: 0.5*100 + 0.3*0 + 0.2*100 = 70
         result = calc.calculate_score({
             "slow-svc": {
                 "healthy": True,
@@ -126,7 +123,6 @@ class TestBreachReasonPopulatedBelow80:
     """Test 5: breach_reason is a non-empty string when score < 80."""
 
     def test_breach_reason_set_when_score_below_80(self):
-        # One service totally down in a single-service fleet → score = 50
         result = calc.calculate_score({
             "critical-svc": {
                 "healthy": False,

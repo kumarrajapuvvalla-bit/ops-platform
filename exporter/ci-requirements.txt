@@ -1,0 +1,5 @@
+# Lightweight requirements for CI only.
+# Does NOT include boto3/moto/datadog-api-client — tests use unittest.mock.
+pytest==8.2.2
+pytest-mock==3.14.0
+prometheus_client==0.20.0
