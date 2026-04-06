@@ -1,32 +1,63 @@
 groups:
   - name: fleet_slo
     rules:
-      - alert: FleetReadinessCritical
-        expr: fleet_readiness_score < 95
-        for: 2m
-        labels:
-          severity: critical
-          team: platform
-        annotations:
-          summary: "Fleet Readiness Score below SLO threshold"
-          description: "Fleet readiness score is {{ $value | printf \"%.1f\" }} (threshold: 95). Environment: {{ $labels.environment }}."
-          runbook: "https://github.com/kumarrajapuvvalla-bit/ops-platform/blob/main/runbooks/high_latency_incident.md"
-
-      - alert: FleetReadinessWarning
-        expr: fleet_readiness_score < 99
+      - alert: FleetReadinessBreach
+        expr: fleet_readiness_score{job="fleet-exporter"} < 95
         for: 5m
         labels:
           severity: warning
+          priority: P1
           team: platform
         annotations:
-          summary: "Fleet Readiness Score degraded"
-          description: "Fleet readiness score is {{ $value | printf \"%.1f\" }} (threshold: 99). Investigate before it drops further."
+          summary: "Fleet Readiness Score below SLO threshold (P1)"
+          description: >-
+            Fleet readiness score is {{ $value | printf "%.1f" }} on
+            environment={{ $labels.environment }} cluster={{ $labels.cluster }}.
+            SLO threshold is 95. Investigate EKS node health and ECS service health.
+          runbook: "https://github.com/kumarrajapuvvalla-bit/ops-platform/blob/main/runbooks/high_latency_incident.md"
+
+      - alert: FleetReadinessCritical
+        expr: fleet_readiness_score{job="fleet-exporter"} < 80
+        for: 2m
+        labels:
+          severity: critical
+          priority: P0
+          team: platform
+        annotations:
+          summary: "Fleet Readiness Score critically low (P0) — page on-call immediately"
+          description: >-
+            Fleet readiness score is {{ $value | printf "%.1f" }} on
+            environment={{ $labels.environment }}. Score below 80 indicates
+            multiple services are failing. Immediate action required.
+          runbook: "https://github.com/kumarrajapuvvalla-bit/ops-platform/blob/main/runbooks/eks_node_failure.md"
+
+      - alert: OperatorHealingLoop
+        expr: >-
+          increase(
+            flightroute_healing_count_total[1h]
+          ) > 10
+        for: 0m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "FlightRoute operator is healing more than 10 times per hour"
+          description: >-
+            FlightRoute {{ $labels.name }} has been healed
+            {{ $value | printf "%.0f" }} times in the last hour.
+            Frequent healing suggests a persistent underlying issue —
+            investigate the backing deployment directly.
+          runbook: "https://github.com/kumarrajapuvvalla-bit/ops-platform/blob/main/runbooks/operator_reconcile_stall.md"
 
       - alert: EksNodeGroupUnhealthy
-        expr: eks_node_health_ratio < 0.8
+        expr: eks_node_health_ratio{job="fleet-exporter"} < 0.8
         for: 3m
         labels:
           severity: warning
+          team: platform
         annotations:
-          summary: "EKS node group health degraded"
-          description: "Node group {{ $labels.node_group }} health ratio is {{ $value | printf \"%.2f\" }} (80% threshold)."
+          summary: "EKS node group health degraded below 80%"
+          description: >-
+            Node group {{ $labels.node_group }} in cluster {{ $labels.cluster }}
+            has health ratio {{ $value | printf "%.2f" }}. 20% or more nodes
+            are unhealthy.

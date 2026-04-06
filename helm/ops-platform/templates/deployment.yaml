@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ops-platform.fullname" . }}-exporter
+  labels:
+    {{- include "ops-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: fleet-exporter
+spec:
+  {{- if not .Values.fleetExporter.autoscaling.enabled }}
+  replicas: {{ .Values.fleetExporter.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "ops-platform.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: fleet-exporter
+  template:
+    metadata:
+      labels:
+        {{- include "ops-platform.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: fleet-exporter
+    spec:
+      serviceAccountName: {{ .Values.fleetExporter.serviceAccount.name | default (printf "%s-exporter" (include "ops-platform.fullname" .)) }}
+      # Non-root security context (spec requirement)
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: fleet-exporter
+          image: "{{ .Values.global.imageRegistry }}/{{ .Values.fleetExporter.image.repository }}:{{ .Values.fleetExporter.image.tag }}"
+          imagePullPolicy: {{ .Values.fleetExporter.image.pullPolicy }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.fleetExporter.service.port }}
+              protocol: TCP
+          # Readiness probe on /metrics (spec requirement)
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 3
+            successThreshold: 1
+            timeoutSeconds: 5
+          # Liveness probe on /metrics (spec requirement)
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            failureThreshold: 3
+            timeoutSeconds: 5
+          env:
+            - name: ENVIRONMENT
+              value: {{ .Values.global.environment | quote }}
+            - name: METRICS_PORT
+              value: {{ .Values.fleetExporter.service.port | quote }}
+            - name: SCRAPE_INTERVAL
+              value: {{ .Values.fleetExporter.env.SCRAPE_INTERVAL | quote }}
+          resources:
+            {{- toYaml .Values.fleetExporter.resources | nindent 12 }}
+          # Container-level security context (non-root, no privilege escalation)
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop:
+                - ALL

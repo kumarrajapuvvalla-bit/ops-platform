@@ -1,67 +1,191 @@
 {
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "description": "Prometheus datasource for ops-platform metrics",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "__requires": [
+    {"type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.0.0"},
+    {"type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0"}
+  ],
   "title": "Fleet Operations Dashboard",
   "uid": "fleet-ops-001",
-  "description": "Real-time operational health of the ops-platform fleet. Modelled on airline dispatch reliability dashboards.",
+  "description": "Real-time operational health of the ops-platform. Modelled on airline dispatch reliability dashboards.",
   "tags": ["ops-platform", "fleet", "slo"],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "time": {"from": "now-1h", "to": "now"},
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "label": "Datasource",
+        "pluginId": "prometheus",
+        "current": {"text": "Prometheus", "value": "${DS_PROMETHEUS}"},
+        "hide": 0,
+        "includeAll": false,
+        "multi": false
+      },
+      {
+        "name": "environment",
+        "type": "custom",
+        "label": "Environment",
+        "current": {"text": "prod", "value": "prod"},
+        "options": [
+          {"text": "dev", "value": "dev", "selected": false},
+          {"text": "prod", "value": "prod", "selected": true}
+        ],
+        "hide": 0
+      },
+      {
+        "name": "cluster",
+        "type": "query",
+        "label": "Cluster",
+        "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+        "query": "label_values(fleet_readiness_score, cluster)",
+        "refresh": 2,
+        "hide": 0
+      }
+    ]
+  },
   "panels": [
     {
       "id": 1,
       "title": "Fleet Readiness Score",
+      "description": "Overall fleet health score (0-100). Green ≥ 95, Amber ≥ 80, Red < 80.",
       "type": "gauge",
       "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
       "fieldConfig": {
         "defaults": {
           "min": 0,
           "max": 100,
+          "unit": "percent",
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {"color": "red", "value": 0},
-              {"color": "yellow", "value": 95},
-              {"color": "green", "value": 99}
+              {"color": "orange", "value": 80},
+              {"color": "green", "value": 95}
             ]
           },
-          "unit": "percent"
+          "mappings": []
         }
+      },
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"]},
+        "orientation": "auto",
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true
       },
       "targets": [
         {
-          "expr": "fleet_readiness_score{environment=\"$environment\"}",
-          "legendFormat": "Readiness Score"
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "expr": "fleet_readiness_score{environment=\"$environment\", cluster=\"$cluster\"}",
+          "legendFormat": "Readiness Score",
+          "refId": "A"
         }
       ]
     },
     {
       "id": 2,
-      "title": "EKS Node Health by Node Group",
+      "title": "Request Rate (5m)",
+      "description": "Incoming request rate to all fleet services over 5 minute window.",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 6, "y": 0},
+      "gridPos": {"h": 8, "w": 9, "x": 6, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": {"mode": "palette-classic"}
+        }
+      },
+      "options": {
+        "tooltip": {"mode": "multi"},
+        "legend": {"displayMode": "list", "placement": "bottom"}
+      },
       "targets": [
         {
-          "expr": "eks_node_health_ratio{cluster=\"$cluster\"}",
-          "legendFormat": "{{node_group}}"
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "expr": "sum(rate(http_requests_total{environment=\"$environment\"}[5m])) by (service)",
+          "legendFormat": "{{service}}",
+          "refId": "A"
         }
       ]
     },
     {
       "id": 3,
-      "title": "Self-Healing Events",
-      "type": "stat",
-      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 8},
+      "title": "Error Rate",
+      "description": "HTTP 5xx error rate across all fleet services.",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 9, "x": 15, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "color": {"mode": "fixed", "fixedColor": "red"},
+          "custom": {"thresholdsStyle": {"mode": "line"}},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": 0},
+              {"color": "red", "value": 0.05}
+            ]
+          }
+        }
+      },
       "targets": [
         {
-          "expr": "sum(increase(flightroute_healing_count_total[24h]))",
-          "legendFormat": "Heals (24h)"
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "expr": "sum(rate(http_requests_total{environment=\"$environment\", status=~\"5..\"}[5m])) / sum(rate(http_requests_total{environment=\"$environment\"}[5m]))",
+          "legendFormat": "Error Rate",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Active Pods",
+      "description": "Total number of running pods across the fleet namespace.",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": 0},
+              {"color": "yellow", "value": 2},
+              {"color": "green", "value": 4}
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"]},
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "expr": "active_pods_total{environment=\"$environment\"}",
+          "legendFormat": "Active Pods",
+          "refId": "A"
         }
       ]
     }
-  ],
-  "templating": {
-    "list": [
-      {"name": "environment", "type": "custom", "options": [{"value": "dev"}, {"value": "prod"}]},
-      {"name": "cluster", "type": "query", "query": "label_values(eks_node_health_ratio, cluster)"}
-    ]
-  },
-  "refresh": "30s",
-  "schemaVersion": 38
+  ]
 }

@@ -4,6 +4,9 @@ global:
   environment: dev
   imageRegistry: ghcr.io/kumarrajapuvvalla-bit
 
+nameOverride: ""
+fullnameOverride: ""
+
 # ── Fleet Health Exporter ──────────────────────────────────────────────────────
 fleetExporter:
   enabled: true
@@ -14,7 +17,7 @@ fleetExporter:
     pullPolicy: IfNotPresent
   service:
     type: ClusterIP
-    port: 9090
+    port: 8000
   resources:
     requests:
       cpu: 100m
@@ -23,21 +26,28 @@ fleetExporter:
       cpu: 500m
       memory: 256Mi
   env:
-    SCRAPE_INTERVAL: "60"
-    METRICS_PORT: "9090"
+    SCRAPE_INTERVAL: "30"
+    METRICS_PORT: "8000"
   serviceAccount:
     create: true
+    name: ""
     annotations:
       eks.amazonaws.com/role-arn: ""  # Set via values override for IRSA
   podSecurityContext:
     runAsNonRoot: true
     runAsUser: 1000
-    fsGroup: 2000
+    fsGroup: 1000
   securityContext:
     allowPrivilegeEscalation: false
     readOnlyRootFilesystem: true
     capabilities:
       drop: [ALL]
+  # HPA configuration (spec requirement)
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
 
 # ── Self-Healing Operator ────────────────────────────────────────────────────
 selfHealingOperator:
@@ -59,7 +69,7 @@ selfHealingOperator:
     create: true
     annotations: {}
 
-# ── Prometheus scrape config ─────────────────────────────────────────────────
+# ── Prometheus ServiceMonitor ─────────────────────────────────────────────────
 prometheus:
   serviceMonitor:
     enabled: true

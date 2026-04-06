@@ -1,0 +1,75 @@
+groups:
+  - name: eks_node_pressure
+    rules:
+      - alert: NodeMemoryPressure
+        expr: >-
+          kube_node_status_condition{
+            condition="MemoryPressure",
+            status="true"
+          } == 1
+        for: 2m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Node {{ $labels.node }} is under memory pressure"
+          description: >-
+            Kubernetes node {{ $labels.node }} has MemoryPressure=True for
+            over 2 minutes. The kubelet is reclaiming memory; pods may be
+            evicted soon. Check for pods without memory limits.
+          runbook: "https://github.com/kumarrajapuvvalla-bit/ops-platform/blob/main/runbooks/eks_node_failure.md"
+
+      - alert: NodeDiskPressure
+        expr: >-
+          kube_node_status_condition{
+            condition="DiskPressure",
+            status="true"
+          } == 1
+        for: 2m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Node {{ $labels.node }} is under disk pressure"
+          description: >-
+            Kubernetes node {{ $labels.node }} has DiskPressure=True for
+            over 2 minutes. The kubelet may evict pods to reclaim disk space.
+            Check for large container logs or ephemeral storage usage.
+          runbook: "https://github.com/kumarrajapuvvalla-bit/ops-platform/blob/main/runbooks/eks_node_failure.md"
+
+      - alert: PodCrashLooping
+        expr: >-
+          rate(
+            kube_pod_container_status_restarts_total[
+              5m
+            ]
+          ) * 60 > 1
+        for: 5m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} is crash-looping"
+          description: >-
+            Container {{ $labels.container }} in pod {{ $labels.pod }}
+            (namespace {{ $labels.namespace }}) is restarting more than once
+            per minute over the last 5 minutes.
+            Current restart rate: {{ $value | printf "%.2f" }}/min.
+          runbook: "https://github.com/kumarrajapuvvalla-bit/ops-platform/blob/main/runbooks/failed_deployment_rollback.md"
+
+      - alert: NodeNotReady
+        expr: >-
+          kube_node_status_condition{
+            condition="Ready",
+            status="true"
+          } == 0
+        for: 5m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Node {{ $labels.node }} is NotReady"
+          description: >-
+            Kubernetes node {{ $labels.node }} has been NotReady for over
+            5 minutes. All pods on this node may be unschedulable.
+          runbook: "https://github.com/kumarrajapuvvalla-bit/ops-platform/blob/main/runbooks/eks_node_failure.md"

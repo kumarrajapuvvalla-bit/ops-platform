@@ -1,0 +1,15 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "ops-platform.fullname" . }}-exporter
+  labels:
+    {{- include "ops-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: fleet-exporter
+spec:
+  # minAvailable: 1 ensures at least one pod is always running
+  # during voluntary disruptions (node drains, rolling updates)
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "ops-platform.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: fleet-exporter
