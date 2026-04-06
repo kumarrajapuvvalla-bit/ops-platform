@@ -1,0 +1,10 @@
+{
+  "app": "python app.py",
+  "context": {
+    "environment": "dev",
+    "account": "123456789012",
+    "region": "eu-west-2"
+  },
+  "requireApproval": "never",
+  "output": "cdk.out"
+}

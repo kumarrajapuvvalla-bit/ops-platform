@@ -1,96 +1,125 @@
-"""datadog_bridge.py — Datadog Metrics Bridge
+"""datadog_bridge.py — Forward P0 metrics to Datadog
 
-Forwards P0 threshold breaches from the Fleet Health Exporter to
-Datadog as custom metrics and events. This bridge pattern allows
-Prometheus to remain the primary metrics store while using Datadog
-for alerting, dashboarding, and incident correlation.
+Forwards fleet health metrics to Datadog when the readiness score
+drops below the breach threshold (80). Falls back to structured
+JSON stdout logging when no API key is configured.
 
-Requires:
-    DATADOG_API_KEY environment variable
-    DATADOG_APP_KEY environment variable (for Events API)
+Designed to be called by fleet_exporter.py when score < 80.
 """
 
+from __future__ import annotations
+
+import json
 import logging
 import os
-import time
+from datetime import datetime, timezone
 from typing import Optional
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
-try:
-    from datadog_api_client import ApiClient, Configuration
-    from datadog_api_client.v2.api.metrics_api import MetricsApi
-    from datadog_api_client.v2.model.metric_intake_type import MetricIntakeType
-    from datadog_api_client.v2.model.metric_payload import MetricPayload
-    from datadog_api_client.v2.model.metric_point import MetricPoint
-    from datadog_api_client.v2.model.metric_series import MetricSeries
-    DATADOG_AVAILABLE = True
-except ImportError:
-    DATADOG_AVAILABLE = False
-    log.warning("datadog-api-client not installed — Datadog bridge disabled")
+# Score below this threshold triggers a P0 Datadog metric push
+P0_THRESHOLD = 80.0
 
 
 class DatadogBridge:
-    """Pushes P0 metrics and events to Datadog."""
+    """Forwards P0 fleet health breaches to Datadog.
+
+    When DATADOG_API_KEY is not set, logs structured JSON to stdout
+    instead (useful for local development and CI testing).
+    """
 
     def __init__(self) -> None:
-        self.api_key = os.getenv("DATADOG_API_KEY", "")
-        self.app_key = os.getenv("DATADOG_APP_KEY", "")
-        self.enabled = bool(self.api_key) and DATADOG_AVAILABLE
+        self.api_key: Optional[str] = os.environ.get("DATADOG_API_KEY")
+        self.app_key: Optional[str] = os.environ.get("DATADOG_APP_KEY")
+        self.site: str = os.environ.get("DATADOG_SITE", "datadoghq.eu")
+        self.enabled: bool = bool(self.api_key)
 
-        if not self.enabled:
-            log.info("Datadog bridge disabled (no API key or package missing)")
-
-    def push_p0_metric(
+    def forward_p0_metric(
         self,
         metric_name: str,
         value: float,
-        tags: Optional[list[str]] = None,
+        tags: list[str],
     ) -> bool:
-        """Submit a gauge metric to Datadog.
+        """Forward a P0 metric to Datadog if score is below threshold.
 
         Args:
-            metric_name: Fully qualified metric name, e.g. ops_platform.fleet.readiness_score
-            value: Current metric value
-            tags: Optional list of tags e.g. ["env:prod", "cluster:ops-platform"]
+            metric_name: Datadog metric name (e.g. 'fleet.readiness.score')
+            value:        Current metric value
+            tags:         List of Datadog tags (e.g. ['env:prod', 'cluster:eks'])
 
         Returns:
-            True if the metric was submitted successfully, False otherwise
+            True if the metric was successfully pushed, False otherwise.
         """
+        # Only push if value indicates a P0 breach
+        if value >= P0_THRESHOLD:
+            return False
+
         if not self.enabled:
-            log.debug("Datadog bridge disabled — skipping metric %s", metric_name)
+            self._log_to_stdout(metric_name, value, tags)
             return False
 
         try:
-            configuration = Configuration()
-            configuration.api_key["apiKeyAuth"] = self.api_key
-            configuration.api_key["appKeyAuth"] = self.app_key
-
-            with ApiClient(configuration) as api_client:
-                api = MetricsApi(api_client)
-                body = MetricPayload(
-                    series=[
-                        MetricSeries(
-                            metric=metric_name,
-                            type=MetricIntakeType.GAUGE,
-                            points=[
-                                MetricPoint(
-                                    timestamp=int(time.time()),
-                                    value=value,
-                                )
-                            ],
-                            tags=tags or [],
-                        )
-                    ]
-                )
-                api.submit_metrics(body=body)
-                log.info("Submitted Datadog metric %s=%.2f (tags=%s)", metric_name, value, tags)
-                return True
-
-        except Exception as exc:  # noqa: BLE001
-            log.error("Failed to submit Datadog metric %s: %s", metric_name, exc)
+            return self._send_to_datadog(metric_name, value, tags)
+        except Exception as exc:
+            logger.error(
+                "DatadogBridge failed to push metric",
+                extra={"metric": metric_name, "error": str(exc)},
+            )
             return False
 
-    def is_healthy(self) -> bool:
-        """Return True if the bridge is configured and available."""
-        return self.enabled
+    def _send_to_datadog(self, metric_name: str, value: float, tags: list[str]) -> bool:
+        """Send the metric to Datadog via the API client.
+
+        Imports datadog_api_client lazily so CI tests can run without
+        the heavy datadog-api-client package installed.
+        """
+        try:
+            from datadog_api_client import ApiClient, Configuration
+            from datadog_api_client.v2.api.metrics_api import MetricsApi
+            from datadog_api_client.v2.model.metric_intake_type import MetricIntakeType
+            from datadog_api_client.v2.model.metric_payload import MetricPayload
+            from datadog_api_client.v2.model.metric_point import MetricPoint
+            from datadog_api_client.v2.model.metric_series import MetricSeries
+        except ImportError:
+            logger.warning("datadog-api-client not installed, falling back to stdout logging")
+            self._log_to_stdout(metric_name, value, tags)
+            return False
+
+        configuration = Configuration()
+        configuration.api_key["apiKeyAuth"] = self.api_key
+        configuration.server_variables["site"] = self.site
+
+        now = int(datetime.now(timezone.utc).timestamp())
+        body = MetricPayload(
+            series=[
+                MetricSeries(
+                    metric=metric_name,
+                    type=MetricIntakeType.GAUGE,
+                    points=[MetricPoint(timestamp=now, value=value)],
+                    tags=tags,
+                )
+            ]
+        )
+
+        with ApiClient(configuration) as api_client:
+            api = MetricsApi(api_client)
+            api.submit_metrics(body=body)
+
+        logger.info(
+            "Datadog P0 metric pushed",
+            extra={"metric": metric_name, "value": value, "tags": tags},
+        )
+        return True
+
+    def _log_to_stdout(self, metric_name: str, value: float, tags: list[str]) -> None:
+        """Emit a structured JSON log when Datadog is not configured."""
+        payload = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "level": "P0",
+            "event": "fleet_breach",
+            "metric": metric_name,
+            "value": value,
+            "tags": tags,
+            "datadog_enabled": False,
+        }
+        print(json.dumps(payload), flush=True)
