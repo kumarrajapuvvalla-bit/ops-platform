@@ -1,0 +1,72 @@
+---
+# eks_node_bootstrap.yml — EKS Node Bootstrap
+#
+# Configures fresh EC2 instances as EKS worker nodes.
+# Installs containerd, configures kubelet, installs SSM agent.
+# Targeted at Amazon Linux 2 nodes.
+
+- name: Bootstrap EKS worker nodes
+  hosts: eks_nodes
+  become: true
+  vars:
+    cluster_name: "{{ lookup('env', 'EKS_CLUSTER_NAME') | default('ops-platform-prod') }}"
+    aws_region: "{{ lookup('env', 'AWS_REGION') | default('eu-west-2') }}"
+    k8s_version: "1.29"
+
+  tasks:
+    - name: Update all packages
+      ansible.builtin.yum:
+        name: "*"
+        state: latest
+        update_cache: true
+
+    - name: Install containerd and dependencies
+      ansible.builtin.yum:
+        name:
+          - containerd
+          - amazon-ssm-agent
+          - aws-cli
+          - jq
+          - curl
+        state: present
+
+    - name: Configure containerd
+      ansible.builtin.template:
+        src: ../templates/containerd-config.toml.j2
+        dest: /etc/containerd/config.toml
+        mode: '0644'
+      notify: restart containerd
+
+    - name: Enable and start containerd
+      ansible.builtin.systemd:
+        name: containerd
+        enabled: true
+        state: started
+
+    - name: Enable SSM agent
+      ansible.builtin.systemd:
+        name: amazon-ssm-agent
+        enabled: true
+        state: started
+
+    - name: Configure kubelet extra args
+      ansible.builtin.lineinfile:
+        path: /etc/eks/bootstrap.sh
+        regexp: '^KUBELET_EXTRA_ARGS'
+        line: 'KUBELET_EXTRA_ARGS="--node-labels=ops-platform/nodegroup=worker --max-pods=110"'
+        create: true
+        mode: '0755'
+
+    - name: Bootstrap node into EKS cluster
+      ansible.builtin.command:
+        cmd: >
+          /etc/eks/bootstrap.sh {{ cluster_name }}
+          --b64-cluster-ca {{ cluster_ca }}
+          --apiserver-endpoint {{ cluster_endpoint }}
+      changed_when: true
+
+  handlers:
+    - name: restart containerd
+      ansible.builtin.systemd:
+        name: containerd
+        state: restarted

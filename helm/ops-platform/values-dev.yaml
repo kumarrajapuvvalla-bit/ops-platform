@@ -1,0 +1,13 @@
+# Dev environment overrides
+global:
+  environment: dev
+
+fleetExporter:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+
+selfHealingOperator:
+  leaderElection: false  # Single replica in dev

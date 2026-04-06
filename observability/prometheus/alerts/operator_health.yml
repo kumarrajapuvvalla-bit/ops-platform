@@ -1,0 +1,31 @@
+groups:
+  - name: operator_health
+    rules:
+      - alert: OperatorReconcileLag
+        expr: rate(controller_runtime_reconcile_total{controller="flightroute"}[5m]) == 0
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "FlightRoute operator reconcile loop stalled"
+          description: "No reconcile events in the last 5 minutes. Operator may be stuck."
+          runbook: "https://github.com/kumarrajapuvvalla-bit/ops-platform/blob/main/runbooks/operator_reconcile_stall.md"
+
+      - alert: OperatorErrorRate
+        expr: rate(controller_runtime_reconcile_errors_total{controller="flightroute"}[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "FlightRoute operator error rate elevated"
+          description: "Operator is erroring at {{ $value | printf \"%.2f\" }} errors/s."
+
+      - alert: SelfHealingTriggeredFrequently
+        expr: increase(flightroute_healing_count_total[10m]) > 5
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Self-healing triggered frequently — investigate root cause"
+          description: "FlightRoute {{ $labels.name }} has been healed {{ $value }} times in 10 minutes."

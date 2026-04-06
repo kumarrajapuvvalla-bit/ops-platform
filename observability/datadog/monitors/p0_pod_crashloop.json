@@ -1,0 +1,11 @@
+{
+  "name": "[P0] Pod CrashLoopBackOff",
+  "type": "metric alert",
+  "query": "sum(last_5m):sum:kubernetes.containers.state.waiting{reason:crashloopbackoff,env:prod} > 0",
+  "message": "@pagerduty-platform @slack-platform-alerts\n\nPod CrashLoopBackOff detected in PROD.\n\nRunbook: https://github.com/kumarrajapuvvalla-bit/ops-platform/blob/main/runbooks/failed_deployment_rollback.md",
+  "tags": ["ops-platform", "p0", "prod"],
+  "priority": 1,
+  "thresholds": {"critical": 0},
+  "notify_no_data": false,
+  "evaluation_delay": 60
+}

@@ -1,0 +1,67 @@
+# Default values for ops-platform Helm chart
+
+global:
+  environment: dev
+  imageRegistry: ghcr.io/kumarrajapuvvalla-bit
+
+# ── Fleet Health Exporter ──────────────────────────────────────────────────────
+fleetExporter:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: fleet-exporter
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 9090
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  env:
+    SCRAPE_INTERVAL: "60"
+    METRICS_PORT: "9090"
+  serviceAccount:
+    create: true
+    annotations:
+      eks.amazonaws.com/role-arn: ""  # Set via values override for IRSA
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 2000
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+
+# ── Self-Healing Operator ────────────────────────────────────────────────────
+selfHealingOperator:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ops-operator
+    tag: latest
+    pullPolicy: IfNotPresent
+  leaderElection: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 128Mi
+  serviceAccount:
+    create: true
+    annotations: {}
+
+# ── Prometheus scrape config ─────────────────────────────────────────────────
+prometheus:
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    path: /metrics

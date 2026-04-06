@@ -1,0 +1,32 @@
+groups:
+  - name: fleet_slo
+    rules:
+      - alert: FleetReadinessCritical
+        expr: fleet_readiness_score < 95
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Fleet Readiness Score below SLO threshold"
+          description: "Fleet readiness score is {{ $value | printf \"%.1f\" }} (threshold: 95). Environment: {{ $labels.environment }}."
+          runbook: "https://github.com/kumarrajapuvvalla-bit/ops-platform/blob/main/runbooks/high_latency_incident.md"
+
+      - alert: FleetReadinessWarning
+        expr: fleet_readiness_score < 99
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Fleet Readiness Score degraded"
+          description: "Fleet readiness score is {{ $value | printf \"%.1f\" }} (threshold: 99). Investigate before it drops further."
+
+      - alert: EksNodeGroupUnhealthy
+        expr: eks_node_health_ratio < 0.8
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "EKS node group health degraded"
+          description: "Node group {{ $labels.node_group }} health ratio is {{ $value | printf \"%.2f\" }} (80% threshold)."

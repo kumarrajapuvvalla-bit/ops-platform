@@ -1,0 +1,209 @@
+# .gitlab-ci.yml — ops-platform 10-Stage Pipeline
+#
+# Stages:
+#   lint → unit-test → cdk-synth → security-scan →
+#   docker-build → helm-package → deploy-dev →
+#   integration-test → deploy-prod → notify
+
+image: python:3.12-slim
+
+variables:
+  AWS_REGION: eu-west-2
+  EKS_CLUSTER_DEV: ops-platform-dev
+  EKS_CLUSTER_PROD: ops-platform-prod
+  DOCKER_REGISTRY: ghcr.io/kumarrajapuvvalla-bit
+
+stages:
+  - lint
+  - unit-test
+  - cdk-synth
+  - security-scan
+  - docker-build
+  - helm-package
+  - deploy-dev
+  - integration-test
+  - deploy-prod
+  - notify
+
+# ── Stage 1: Lint ──────────────────────────────────────────────────────────
+python-lint:
+  stage: lint
+  script:
+    - pip install ruff mypy
+    - ruff check exporter/ infrastructure/ --select E,F,W --ignore E501
+    - mypy exporter/fleet_exporter.py --ignore-missing-imports
+  rules:
+    - changes:
+        - exporter/**
+        - infrastructure/**
+
+helm-lint:
+  stage: lint
+  image: alpine/helm:3.14.0
+  script:
+    - helm lint helm/ops-platform/
+    - helm template ops-platform helm/ops-platform/ --values helm/ops-platform/values-dev.yaml > /dev/null
+  rules:
+    - changes:
+        - helm/**
+
+# ── Stage 2: Unit Tests ─────────────────────────────────────────────────────
+unit-tests:
+  stage: unit-test
+  script:
+    - pip install -r exporter/requirements.txt
+    - pytest exporter/tests/ -v --tb=short --junitxml=test-report.xml
+  artifacts:
+    reports:
+      junit: test-report.xml
+    expire_in: 1 week
+
+cdk-tests:
+  stage: unit-test
+  script:
+    - pip install -r infrastructure/requirements.txt
+    - pip install aws-cdk-lib constructs
+    - pytest infrastructure/tests/ -v
+  rules:
+    - changes:
+        - infrastructure/**
+
+# ── Stage 3: CDK Synth ────────────────────────────────────────────────────
+cdk-synth:
+  stage: cdk-synth
+  image: node:20
+  script:
+    - npm install -g aws-cdk
+    - pip install -r infrastructure/requirements.txt
+    - cd infrastructure && cdk synth --context environment=dev
+  artifacts:
+    paths:
+      - infrastructure/cdk.out/
+    expire_in: 1 day
+  rules:
+    - changes:
+        - infrastructure/**
+
+# ── Stage 4: Security Scan ──────────────────────────────────────────────────
+checkov-scan:
+  stage: security-scan
+  image: bridgecrew/checkov:latest
+  script:
+    - checkov -d infrastructure/ --framework cloudformation --compact --soft-fail
+    - checkov -d helm/ --framework helm --compact --soft-fail
+  artifacts:
+    reports:
+      sast: checkov-report.json
+  rules:
+    - changes:
+        - infrastructure/**
+        - helm/**
+
+bанdit-scan:
+  stage: security-scan
+  script:
+    - pip install bandit
+    - bandit -r exporter/ -l -i -f json -o bandit-report.json || true
+  artifacts:
+    paths:
+      - bandit-report.json
+    expire_in: 1 week
+
+# ── Stage 5: Docker Build ──────────────────────────────────────────────────
+docker-build-exporter:
+  stage: docker-build
+  image: docker:24
+  services:
+    - docker:24-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+  script:
+    - docker build -f exporter/Dockerfile -t $DOCKER_REGISTRY/fleet-exporter:$CI_COMMIT_SHA exporter/
+    - docker run --rm aquasec/trivy:latest image --severity CRITICAL,HIGH --exit-code 1 $DOCKER_REGISTRY/fleet-exporter:$CI_COMMIT_SHA
+    - echo $CI_REGISTRY_PASSWORD | docker login ghcr.io -u $CI_REGISTRY_USER --password-stdin
+    - docker push $DOCKER_REGISTRY/fleet-exporter:$CI_COMMIT_SHA
+    - docker tag $DOCKER_REGISTRY/fleet-exporter:$CI_COMMIT_SHA $DOCKER_REGISTRY/fleet-exporter:latest
+    - docker push $DOCKER_REGISTRY/fleet-exporter:latest
+  only:
+    - main
+
+docker-build-operator:
+  stage: docker-build
+  image: golang:1.22
+  script:
+    - cd operator && CGO_ENABLED=0 go build -o manager .
+    - docker build -f operator/Dockerfile -t $DOCKER_REGISTRY/ops-operator:$CI_COMMIT_SHA operator/
+  only:
+    - main
+
+# ── Stage 6: Helm Package ──────────────────────────────────────────────────
+helm-package:
+  stage: helm-package
+  image: alpine/helm:3.14.0
+  script:
+    - helm dependency update helm/ops-platform/
+    - helm package helm/ops-platform/ --version $CI_COMMIT_SHORT_SHA --app-version $CI_COMMIT_SHA
+  artifacts:
+    paths:
+      - '*.tgz'
+    expire_in: 1 week
+  only:
+    - main
+
+# ── Stage 7: Deploy Dev ─────────────────────────────────────────────────────
+deploy-dev:
+  stage: deploy-dev
+  image: bitnami/kubectl:latest
+  environment:
+    name: dev
+    url: https://ops-dev.example.com
+  script:
+    - aws eks update-kubeconfig --region $AWS_REGION --name $EKS_CLUSTER_DEV
+    - helm upgrade --install ops-platform helm/ops-platform/
+        --namespace ops-platform-dev --create-namespace
+        --values helm/ops-platform/values-dev.yaml
+        --set image.tag=$CI_COMMIT_SHA
+        --wait --timeout 5m
+  only:
+    - main
+
+# ── Stage 8: Integration Tests ───────────────────────────────────────────────
+integration-test:
+  stage: integration-test
+  script:
+    - pip install httpx pytest
+    - pytest tests/integration/ -v --tb=short
+  needs: [deploy-dev]
+  only:
+    - main
+
+# ── Stage 9: Deploy Prod ────────────────────────────────────────────────────
+deploy-prod:
+  stage: deploy-prod
+  image: bitnami/kubectl:latest
+  environment:
+    name: prod
+    url: https://ops.example.com
+  script:
+    - aws eks update-kubeconfig --region $AWS_REGION --name $EKS_CLUSTER_PROD
+    - helm upgrade --install ops-platform helm/ops-platform/
+        --namespace ops-platform-prod --create-namespace
+        --values helm/ops-platform/values-prod.yaml
+        --set image.tag=$CI_COMMIT_SHA
+        --wait --timeout 10m
+  when: manual  # Requires human approval for prod
+  only:
+    - main
+
+# ── Stage 10: Notify ────────────────────────────────────────────────────────
+notify-slack:
+  stage: notify
+  image: curlimages/curl:latest
+  script:
+    - |
+      curl -X POST $SLACK_WEBHOOK_URL \
+        -H 'Content-type: application/json' \
+        --data "{\"text\":\"ops-platform deployed to prod: $CI_COMMIT_SHORT_SHA by $GITLAB_USER_LOGIN\"}"
+  when: on_success
+  only:
+    - main

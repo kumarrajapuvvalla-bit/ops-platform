@@ -1,0 +1,9 @@
+apiVersion: v2
+name: ops-platform
+description: Helm chart for Fleet Health Exporter and Self-Healing Operator
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+maintainers:
+  - name: Kumar Raja Puvvalla
+    url: https://github.com/kumarrajapuvvalla-bit

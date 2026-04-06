@@ -1,0 +1,67 @@
+{
+  "title": "Fleet Operations Dashboard",
+  "uid": "fleet-ops-001",
+  "description": "Real-time operational health of the ops-platform fleet. Modelled on airline dispatch reliability dashboards.",
+  "tags": ["ops-platform", "fleet", "slo"],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Fleet Readiness Score",
+      "type": "gauge",
+      "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0},
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": 0},
+              {"color": "yellow", "value": 95},
+              {"color": "green", "value": 99}
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "targets": [
+        {
+          "expr": "fleet_readiness_score{environment=\"$environment\"}",
+          "legendFormat": "Readiness Score"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "EKS Node Health by Node Group",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 6, "y": 0},
+      "targets": [
+        {
+          "expr": "eks_node_health_ratio{cluster=\"$cluster\"}",
+          "legendFormat": "{{node_group}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Self-Healing Events",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 8},
+      "targets": [
+        {
+          "expr": "sum(increase(flightroute_healing_count_total[24h]))",
+          "legendFormat": "Heals (24h)"
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": [
+      {"name": "environment", "type": "custom", "options": [{"value": "dev"}, {"value": "prod"}]},
+      {"name": "cluster", "type": "query", "query": "label_values(eks_node_health_ratio, cluster)"}
+    ]
+  },
+  "refresh": "30s",
+  "schemaVersion": 38
+}
