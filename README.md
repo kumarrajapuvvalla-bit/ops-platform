@@ -1,6 +1,6 @@
 # ops-platform
 
-> Self-Healing Cloud Operations Platform — a production-grade portfolio project demonstrating the operational backbone of a 24/7 aviation flight booking platform.
+> Self-Healing Cloud Operations Platform — a production-grade portfolio project demonstrating the operational backbone of a 24/7 global flight booking platform. **For educational and portfolio purposes only.**
 
 [![Python Exporter CI](https://github.com/kumarrajapuvvalla-bit/ops-platform/actions/workflows/exporter-ci.yml/badge.svg)](https://github.com/kumarrajapuvvalla-bit/ops-platform/actions/workflows/exporter-ci.yml)
 [![Go Operator CI](https://github.com/kumarrajapuvvalla-bit/ops-platform/actions/workflows/operator-ci.yml/badge.svg)](https://github.com/kumarrajapuvvalla-bit/ops-platform/actions/workflows/operator-ci.yml)
@@ -181,20 +181,24 @@ cd operator
 go test ./... -v -race
 ```
 
-## How This Maps to Vista Global DevOps Engineer JD
+## How This Maps to a Senior DevOps / SRE Engineer Role
 
-| JD Requirement | Implementation in This Repo |
-|----------------|-----------------------------|
+This project demonstrates the skills typically required for a Senior DevOps or
+SRE Engineer working on 24/7 cloud-native aviation or high-availability
+operations platforms.
+
+| Skill Area | Implementation in This Repo |
+|------------|-----------------------------|
 | AWS (EKS, ECS/Fargate, ALB) | `infrastructure/stacks/eks_stack.py`, `fargate_stack.py` |
-| Terraform / IaC | Python AWS CDK in `infrastructure/` (same skill set, different DSL) |
+| Infrastructure as Code | Python AWS CDK in `infrastructure/` — same IaC principles as Terraform, different DSL |
 | Kubernetes operations | `operator/` — custom controller-runtime operator; `helm/` — Helm chart with HPA + PDB |
 | Helm | `helm/ops-platform/` with templates, values, HPA, PDB, ServiceMonitor |
 | GitLab CI/CD | `.gitlab-ci.yml` — 10-stage pipeline with OIDC, Trivy, manual prod gate |
 | Ansible | `ansible/playbooks/` — node bootstrap, CIS hardening, Datadog agent install |
 | Datadog | `exporter/datadog_bridge.py`, `observability/datadog/monitors/` |
 | Prometheus + Grafana | `observability/prometheus/alerts/`, `observability/grafana/dashboards/` |
-| Python scripting | `exporter/fleet_exporter.py`, `health_calculator.py`, `infrastructure/` CDK stacks |
-| Go development | `operator/` — full Kubernetes operator in Go |
+| Python scripting | `exporter/fleet_exporter.py`, `health_calculator.py`, CDK stacks in `infrastructure/` |
+| Go development | `operator/` — full Kubernetes operator in Go using controller-runtime |
 | 24/7 incident response | `runbooks/` — 4 runbooks; `postmortems/` — INC-001 with UTC timeline |
 | SLO / SRE practices | Fleet Readiness Score, `observability/prometheus/alerts/fleet_slo.yml` |
 | Security / DevSecOps | Trivy in CI, Checkov on CDK, CIS hardening playbook, distroless operator image |
@@ -202,7 +206,9 @@ go test ./... -v -race
 
 ## Disclaimer
 
-This is a **portfolio project** created to demonstrate DevOps engineering skills.
-All code is original and written for educational purposes. No proprietary code,
-credentials, customer data, or confidential information from any employer has
-been used. The aviation domain is used as a realistic technical context only.
+This is a **portfolio and educational project**. All code is original and written
+for learning and demonstration purposes only. No proprietary code, credentials,
+customer data, or confidential information from any employer or company has been
+used. The aviation domain is used purely as a realistic technical context to make
+the project concrete. This project is not affiliated with or endorsed by any real
+company or organisation.
