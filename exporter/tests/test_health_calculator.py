@@ -1,95 +1,154 @@
-"""Unit tests for health_calculator.py"""
+"""test_health_calculator.py — Unit tests for FleetReadinessCalculator
+
+5 tests covering the spec requirements:
+  1. Perfect health returns 100
+  2. One degraded service lowers the score correctly
+  3. All services down returns 0
+  4. High latency alone triggers latency weight
+  5. breach_reason is populated when score drops below 80
+"""
+
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from health_calculator import HealthCalculator, WEIGHTS, SLO_TARGETS
+from health_calculator import FleetReadinessCalculator, ReadinessResult, BREACH_SCORE_THRESHOLD
+
+calc = FleetReadinessCalculator()
 
 
-calc = HealthCalculator()
+def healthy_service(
+    latency_p99_ms: float = 100.0,
+    error_rate: float = 0.0,
+) -> dict:
+    """Helper: build a fully healthy service metrics dict."""
+    return {
+        "healthy": True,
+        "latency_p99_ms": latency_p99_ms,
+        "error_rate": error_rate,
+    }
 
 
-class TestComputeReadinessScore:
-    def test_all_healthy_returns_100(self):
-        score = calc.compute_readiness_score(
-            eks_metrics={"ng-1": 1.0},
-            ecs_metrics={"svc-a": 1.0},
-            alb_metrics={"tg-1": 1.0},
-            rds_metrics={"db-1": 0.0},  # 0 utilisation = perfect
-        )
-        assert score == 100.0
+class TestPerfectHealthReturns100:
+    """Test 1: all services healthy, low latency, zero errors → score = 100."""
 
-    def test_all_failed_returns_0(self):
-        score = calc.compute_readiness_score(
-            eks_metrics={"ng-1": 0.0},
-            ecs_metrics={"svc-a": 0.0},
-            alb_metrics={"tg-1": 0.0},
-            rds_metrics={"db-1": 1.0},  # fully saturated
-        )
-        assert score == 0.0
+    def test_single_perfect_service(self):
+        result = calc.calculate_score({
+            "booking-svc": healthy_service(),
+        })
+        assert isinstance(result, ReadinessResult)
+        assert result.score == 100.0
+        assert result.degraded_services == []
+        assert result.breach_reason is None
 
-    def test_empty_metrics_default_to_1(self):
-        """No resources = no failures = max score."""
-        score = calc.compute_readiness_score(
-            eks_metrics={},
-            ecs_metrics={},
-            alb_metrics={},
-            rds_metrics={},
-        )
-        assert score == 100.0
-
-    def test_partial_ecs_failure_reduces_score(self):
-        score = calc.compute_readiness_score(
-            eks_metrics={"ng-1": 1.0},
-            ecs_metrics={"svc-a": 0.5},  # half tasks running
-            alb_metrics={"tg-1": 1.0},
-            rds_metrics={"db-1": 0.0},
-        )
-        # 30% weight on ECS * 0.5 ratio = 0.15 deduction from ECS component
-        assert score < 100.0
-        assert score > 80.0
-
-    def test_eks_failure_has_highest_impact(self):
-        """EKS has highest weight (35%) so failure there hurts most."""
-        score_eks_fail = calc.compute_readiness_score(
-            eks_metrics={"ng-1": 0.0},
-            ecs_metrics={"svc-a": 1.0},
-            alb_metrics={"tg-1": 1.0},
-            rds_metrics={"db-1": 0.0},
-        )
-        score_rds_fail = calc.compute_readiness_score(
-            eks_metrics={"ng-1": 1.0},
-            ecs_metrics={"svc-a": 1.0},
-            alb_metrics={"tg-1": 1.0},
-            rds_metrics={"db-1": 1.0},
-        )
-        assert score_eks_fail < score_rds_fail
-
-    def test_score_is_bounded_0_to_100(self):
-        for _ in range(10):
-            score = calc.compute_readiness_score(
-                eks_metrics={"ng": 0.7},
-                ecs_metrics={"svc": 0.8},
-                alb_metrics={"tg": 0.9},
-                rds_metrics={"db": 0.3},
-            )
-            assert 0.0 <= score <= 100.0
+    def test_multiple_perfect_services(self):
+        result = calc.calculate_score({
+            "booking-svc": healthy_service(),
+            "payment-svc": healthy_service(latency_p99_ms=50.0),
+            "checkin-svc": healthy_service(latency_p99_ms=200.0, error_rate=0.01),
+        })
+        assert result.score == 100.0
+        assert result.breach_reason is None
 
 
-class TestClassifySlo:
-    def test_nominal_above_999(self):
-        assert calc.classify_slo(99.95) == "nominal"
+class TestOneDegradedServiceLowersScore:
+    """Test 2: one unhealthy service in a fleet of 3 reduces the score."""
 
-    def test_degraded_between_99_and_999(self):
-        assert calc.classify_slo(99.5) == "degraded"
+    def test_one_down_out_of_three_reduces_score(self):
+        result = calc.calculate_score({
+            "booking-svc": healthy_service(),
+            "payment-svc": healthy_service(),
+            "checkin-svc": {
+                "healthy": False,
+                "latency_p99_ms": 100.0,
+                "error_rate": 0.0,
+            },
+        })
+        # checkin-svc availability = 0, contributes 0 * 0.5 = 0 for avail component
+        # Fleet score = (100 + 100 + 50) / 3 = 83.33
+        assert result.score < 100.0
+        assert "checkin-svc" in result.degraded_services
+        assert len(result.degraded_services) == 1
 
-    def test_warning_between_95_and_99(self):
-        assert calc.classify_slo(97.0) == "warning"
+    def test_degraded_service_name_appears_in_list(self):
+        result = calc.calculate_score({
+            "slow-svc": {
+                "healthy": True,
+                "latency_p99_ms": 800.0,  # over SLO
+                "error_rate": 0.0,
+            },
+        })
+        assert "slow-svc" in result.degraded_services
 
-    def test_critical_below_95(self):
-        assert calc.classify_slo(90.0) == "critical"
 
-    def test_exactly_at_threshold(self):
-        assert calc.classify_slo(99.9) == "nominal"
-        assert calc.classify_slo(95.0) == "warning"
+class TestAllServicesDownReturns0:
+    """Test 3: every service unhealthy with max errors → score = 0."""
+
+    def test_all_down_returns_zero(self):
+        result = calc.calculate_score({
+            "booking-svc": {"healthy": False, "latency_p99_ms": 9999.0, "error_rate": 1.0},
+            "payment-svc": {"healthy": False, "latency_p99_ms": 9999.0, "error_rate": 1.0},
+            "checkin-svc": {"healthy": False, "latency_p99_ms": 9999.0, "error_rate": 1.0},
+        })
+        assert result.score == 0.0
+        assert len(result.degraded_services) == 3
+        assert result.breach_reason is not None
+
+
+class TestHighLatencyAloneTriggersLatencyWeight:
+    """Test 4: service is healthy and error-free but latency exceeds SLO."""
+
+    def test_high_latency_reduces_score(self):
+        # 1000ms = 2x the 500ms SLO → latency_score = 0
+        # availability=100, latency=0, error=100
+        # weighted: 0.5*100 + 0.3*0 + 0.2*100 = 70
+        result = calc.calculate_score({
+            "slow-svc": {
+                "healthy": True,
+                "latency_p99_ms": 1000.0,
+                "error_rate": 0.0,
+            },
+        })
+        assert result.score < 100.0
+        assert result.score == pytest.approx(70.0, abs=1.0)
+        assert "slow-svc" in result.degraded_services
+
+    def test_latency_at_slo_boundary_is_not_degraded(self):
+        result = calc.calculate_score({
+            "boundary-svc": healthy_service(latency_p99_ms=500.0),
+        })
+        assert result.score == 100.0
+        assert result.degraded_services == []
+
+
+class TestBreachReasonPopulatedBelow80:
+    """Test 5: breach_reason is a non-empty string when score < 80."""
+
+    def test_breach_reason_set_when_score_below_80(self):
+        # One service totally down in a single-service fleet → score = 50
+        result = calc.calculate_score({
+            "critical-svc": {
+                "healthy": False,
+                "latency_p99_ms": 100.0,
+                "error_rate": 0.0,
+            },
+        })
+        assert result.score < BREACH_SCORE_THRESHOLD
+        assert result.breach_reason is not None
+        assert isinstance(result.breach_reason, str)
+        assert len(result.breach_reason) > 0
+
+    def test_breach_reason_none_when_score_above_80(self):
+        result = calc.calculate_score({
+            "healthy-svc": healthy_service(),
+        })
+        assert result.score >= BREACH_SCORE_THRESHOLD
+        assert result.breach_reason is None
+
+    def test_breach_reason_mentions_degraded_services(self):
+        result = calc.calculate_score({
+            "dead-svc": {"healthy": False, "latency_p99_ms": 100.0, "error_rate": 1.0},
+        })
+        assert result.breach_reason is not None
+        assert "dead-svc" in result.breach_reason

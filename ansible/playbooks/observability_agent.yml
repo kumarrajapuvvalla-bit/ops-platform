@@ -1,0 +1,164 @@
+---
+# observability_agent.yml — Install Datadog Agent + Prometheus Node Exporter
+#
+# Installs and configures:
+#   1. Datadog agent via official install script (with kubernetes_enabled + logs_enabled)
+#   2. Prometheus node_exporter as a systemd service
+# Both are started and enabled on boot.
+#
+# Required vars:
+#   datadog_api_key: Datadog API key (pass via vault or extra vars)
+#   datadog_site: datadoghq.eu (for EU) or datadoghq.com (default)
+
+- name: Install observability agents
+  hosts: eks_nodes
+  become: true
+  vars:
+    datadog_api_key: "{{ lookup('env', 'DATADOG_API_KEY') }}"
+    datadog_site: "datadoghq.eu"
+    node_exporter_version: "1.8.0"
+    node_exporter_user: "node_exporter"
+    node_exporter_install_dir: "/usr/local/bin"
+
+  tasks:
+    # ── Datadog Agent ──────────────────────────────────────────────────────────
+    - name: Download and run Datadog official install script
+      ansible.builtin.shell:
+        cmd: >
+          DD_API_KEY={{ datadog_api_key }}
+          DD_SITE={{ datadog_site }}
+          bash -c "$(curl -L https://s3.amazonaws.com/dd-agent/scripts/install_script_agent7.sh)"
+      args:
+        creates: /etc/datadog-agent/datadog.yaml
+      environment:
+        DD_API_KEY: "{{ datadog_api_key }}"
+        DD_SITE: "{{ datadog_site }}"
+      changed_when: true
+
+    - name: Configure /etc/datadog-agent/datadog.yaml
+      ansible.builtin.template:
+        src: ../templates/datadog.yaml.j2
+        dest: /etc/datadog-agent/datadog.yaml
+        owner: dd-agent
+        group: dd-agent
+        mode: '0640'
+      notify: restart datadog-agent
+
+    - name: Write datadog.yaml directly if template not available
+      ansible.builtin.copy:
+        dest: /etc/datadog-agent/datadog.yaml
+        owner: dd-agent
+        group: dd-agent
+        mode: '0640'
+        content: |
+          api_key: {{ datadog_api_key }}
+          site: {{ datadog_site }}
+          kubernetes_enabled: true
+          logs_enabled: true
+          log_level: INFO
+          tags:
+            - "env:{{ lookup('env', 'ENVIRONMENT') | default('prod') }}"
+            - "project:ops-platform"
+      when: not (ansible_check_mode | default(false))
+      notify: restart datadog-agent
+
+    - name: Enable and start Datadog agent
+      ansible.builtin.systemd:
+        name: datadog-agent
+        enabled: true
+        state: started
+
+    # ── Prometheus Node Exporter ────────────────────────────────────────────────
+    - name: Create node_exporter system user
+      ansible.builtin.user:
+        name: "{{ node_exporter_user }}"
+        system: true
+        shell: /sbin/nologin
+        create_home: false
+
+    - name: Download node_exporter binary
+      ansible.builtin.get_url:
+        url: >-
+          https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version
+          }}/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz
+        dest: /tmp/node_exporter.tar.gz
+        mode: '0644'
+        checksum: "sha256:c15b9efe8b393c0461ef7f72d7c1b1dcd868acf13e6ce40ab3e59437ba628aea"
+
+    - name: Extract node_exporter
+      ansible.builtin.unarchive:
+        src: /tmp/node_exporter.tar.gz
+        dest: /tmp/
+        remote_src: true
+        creates: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
+
+    - name: Install node_exporter binary
+      ansible.builtin.copy:
+        src: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
+        dest: "{{ node_exporter_install_dir }}/node_exporter"
+        owner: root
+        group: root
+        mode: '0755'
+        remote_src: true
+
+    - name: Create node_exporter systemd service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/node_exporter.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Prometheus Node Exporter
+          Documentation=https://prometheus.io/docs/guides/node-exporter/
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          User={{ node_exporter_user }}
+          Group={{ node_exporter_user }}
+          Type=simple
+          ExecStart={{ node_exporter_install_dir }}/node_exporter \
+            --collector.systemd \
+            --collector.processes \
+            --web.listen-address=:9100 \
+            --web.telemetry-path=/metrics
+          Restart=on-failure
+          RestartSec=5s
+          NoNewPrivileges=true
+          ProtectSystem=strict
+          ProtectHome=read-only
+          PrivateTmp=true
+          PrivateDevices=true
+
+          [Install]
+          WantedBy=multi-user.target
+      notify: restart node_exporter
+
+    - name: Reload systemd daemon
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Enable and start node_exporter
+      ansible.builtin.systemd:
+        name: node_exporter
+        enabled: true
+        state: started
+
+    - name: Verify node_exporter is responding
+      ansible.builtin.uri:
+        url: http://localhost:9100/metrics
+        method: GET
+        status_code: 200
+        timeout: 10
+      retries: 3
+      delay: 5
+
+  handlers:
+    - name: restart datadog-agent
+      ansible.builtin.systemd:
+        name: datadog-agent
+        state: restarted
+
+    - name: restart node_exporter
+      ansible.builtin.systemd:
+        name: node_exporter
+        state: restarted
