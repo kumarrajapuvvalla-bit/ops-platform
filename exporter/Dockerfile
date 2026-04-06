@@ -3,7 +3,7 @@
 # Exposes port 8000 (Prometheus HTTP server)
 # Runs as non-root user uid 1000
 
-FROM python:3.11-slim AS builder
+FROM python:3.14-slim AS builder
 
 WORKDIR /build
 
@@ -16,7 +16,7 @@ RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
 
-FROM python:3.11-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 RUN groupadd --gid 1000 appgroup \
     && useradd --uid 1000 --gid appgroup --no-create-home appuser
