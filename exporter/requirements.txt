@@ -4,4 +4,4 @@ prometheus_client==0.20.0
 datadog-api-client==2.26.0
 pytest==8.2.2
 pytest-mock==3.14.0
-moto[eks,ecs,elbv2,rds,cloudwatch]==5.0.12
+moto[eks,ecs,elbv2,rds,cloudwatch]==5.1.22
