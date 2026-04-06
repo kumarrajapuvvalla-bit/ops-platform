@@ -1,0 +1,119 @@
+# SLO Definitions — ops-platform
+#
+# Formal Service Level Objectives defined as code.
+# Format inspired by Google SRE Workbook Chapter 2.
+#
+# Each SLO specifies:
+#   service:       the service this SLO applies to
+#   sli:           the Service Level Indicator (what is measured)
+#   objective:     the target percentage over the window
+#   window:        rolling evaluation window
+#   alerting:      burn rate thresholds for fast/slow burn alerts
+
+version: v1
+owner: platform-team
+last_updated: 2026-04-06
+
+slos:
+
+  # ── Fleet Health Exporter ──────────────────────────────────────────────
+  - name: fleet-exporter-availability
+    service: fleet-exporter
+    sli:
+      type: availability
+      description: Proportion of /metrics requests that return HTTP 200
+      good_events: http_requests_total{job="fleet-exporter", code="200"}
+      total_events: http_requests_total{job="fleet-exporter"}
+    objective: 99.9
+    window: 30d
+    error_budget_minutes: 43.2  # 0.1% of 30 days = 43.2 minutes
+    alerting:
+      fast_burn:
+        threshold: 14.4x  # Consumes 5% of monthly budget in 1 hour
+        window_short: 1h
+        window_long: 6h
+        severity: P0
+      slow_burn:
+        threshold: 3x     # Consumes 10% of monthly budget in 3 days
+        window_short: 6h
+        window_long: 3d
+        severity: P1
+    prometheus_recording_rule: |
+      - record: fleet_exporter:availability:rate30d
+        expr: |
+          sum(rate(http_requests_total{job="fleet-exporter",code="200"}[30d]))
+          /
+          sum(rate(http_requests_total{job="fleet-exporter"}[30d]))
+
+  - name: fleet-exporter-latency
+    service: fleet-exporter
+    sli:
+      type: latency
+      description: Proportion of /metrics requests completing within 500ms (p99)
+      threshold_ms: 500
+    objective: 99.0
+    window: 30d
+    error_budget_minutes: 432  # 1% of 30 days = 432 minutes
+    alerting:
+      fast_burn:
+        threshold: 14.4x
+        window_short: 1h
+        window_long: 6h
+        severity: P1
+      slow_burn:
+        threshold: 3x
+        window_short: 6h
+        window_long: 3d
+        severity: P2
+
+  # ── Self-Healing Operator ──────────────────────────────────────────────
+  - name: operator-reconcile-success
+    service: ops-operator
+    sli:
+      type: availability
+      description: Proportion of reconcile loops that complete without error
+      good_events: controller_runtime_reconcile_total{controller="flightroute", result="success"}
+      total_events: controller_runtime_reconcile_total{controller="flightroute"}
+    objective: 99.5
+    window: 30d
+    error_budget_minutes: 216  # 0.5% of 30 days
+    alerting:
+      fast_burn:
+        threshold: 14.4x
+        window_short: 1h
+        window_long: 6h
+        severity: P1
+      slow_burn:
+        threshold: 3x
+        window_short: 6h
+        window_long: 3d
+        severity: P2
+
+  # ── Fleet Readiness Score ─────────────────────────────────────────────
+  - name: fleet-readiness-score
+    service: fleet-platform
+    sli:
+      type: quality
+      description: Proportion of 1-minute intervals where fleet_readiness_score >= 95
+      metric: fleet_readiness_score
+      threshold: 95
+    objective: 99.0
+    window: 30d
+    error_budget_minutes: 432
+    notes: >
+      This is a composite SLO covering EKS node health, ECS service health,
+      ALB target health, and RDS connection utilisation. A breach means
+      at least one infrastructure component is significantly degraded.
+    alerting:
+      fast_burn:
+        threshold: 14.4x
+        window_short: 1h
+        window_long: 6h
+        severity: P0
+        runbook: runbooks/high_latency_incident.md
+      slow_burn:
+        threshold: 3x
+        window_short: 6h
+        window_long: 3d
+        severity: P1
+        runbook: runbooks/eks_node_failure.md

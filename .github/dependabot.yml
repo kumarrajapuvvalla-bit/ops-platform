@@ -1,0 +1,67 @@
+version: 2
+updates:
+  # Python dependencies (exporter + infrastructure CDK)
+  - package-ecosystem: pip
+    directory: /exporter
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Europe/London
+    labels:
+      - dependencies
+      - python
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: pip
+    directory: /infrastructure
+    schedule:
+      interval: weekly
+      day: monday
+    labels:
+      - dependencies
+      - python
+      - infrastructure
+    open-pull-requests-limit: 3
+
+  # Go modules (operator)
+  - package-ecosystem: gomod
+    directory: /operator
+    schedule:
+      interval: weekly
+      day: tuesday
+      time: "09:00"
+      timezone: Europe/London
+    labels:
+      - dependencies
+      - go
+      - operator
+    open-pull-requests-limit: 5
+
+  # GitHub Actions
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: wednesday
+    labels:
+      - dependencies
+      - github-actions
+    open-pull-requests-limit: 10
+
+  # Docker base images
+  - package-ecosystem: docker
+    directory: /exporter
+    schedule:
+      interval: monthly
+    labels:
+      - dependencies
+      - docker
+
+  - package-ecosystem: docker
+    directory: /operator
+    schedule:
+      interval: monthly
+    labels:
+      - dependencies
+      - docker

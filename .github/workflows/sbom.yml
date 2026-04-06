@@ -1,0 +1,85 @@
+name: Generate SBOM
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag/version to generate SBOM for'
+        required: false
+        default: 'latest'
+
+jobs:
+  sbom-exporter:
+    name: SBOM — Fleet Exporter
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: Generate SBOM for exporter directory
+        uses: anchore/sbom-action@v0
+        with:
+          path: ./exporter
+          format: spdx-json
+          output-file: sbom-exporter-${{ github.ref_name }}.spdx.json
+          artifact-name: sbom-exporter
+
+      - name: Generate SBOM for exporter container image
+        uses: anchore/sbom-action@v0
+        with:
+          image: ghcr.io/kumarrajapuvvalla-bit/fleet-exporter:${{ github.ref_name }}
+          format: spdx-json
+          output-file: sbom-exporter-image-${{ github.ref_name }}.spdx.json
+          artifact-name: sbom-exporter-image
+        continue-on-error: true  # Image may not exist for manual runs
+
+  sbom-operator:
+    name: SBOM — Go Operator
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate SBOM for operator module
+        uses: anchore/sbom-action@v0
+        with:
+          path: ./operator
+          format: spdx-json
+          output-file: sbom-operator-${{ github.ref_name }}.spdx.json
+          artifact-name: sbom-operator
+
+      - name: Scan SBOM for vulnerabilities (Grype)
+        uses: anchore/scan-action@v3
+        with:
+          sbom: sbom-operator-${{ github.ref_name }}.spdx.json
+          fail-build: false  # Report only, do not block release
+          severity-cutoff: critical
+
+  attach-to-release:
+    name: Attach SBOMs to Release
+    runs-on: ubuntu-latest
+    needs: [sbom-exporter, sbom-operator]
+    if: github.event_name == 'release'
+    permissions:
+      contents: write
+    steps:
+      - name: Download all SBOM artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: sboms/
+
+      - name: Attach SBOMs to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: sboms/**/*.json
+          tag_name: ${{ github.ref_name }}
