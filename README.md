@@ -6,6 +6,23 @@
 [![Go Operator CI](https://github.com/kumarrajapuvvalla-bit/ops-platform/actions/workflows/operator-ci.yml/badge.svg)](https://github.com/kumarrajapuvvalla-bit/ops-platform/actions/workflows/operator-ci.yml)
 [![CDK CI](https://github.com/kumarrajapuvvalla-bit/ops-platform/actions/workflows/cdk-ci.yml/badge.svg)](https://github.com/kumarrajapuvvalla-bit/ops-platform/actions/workflows/cdk-ci.yml)
 
+## 🚀 Quick Start (No AWS Required)
+
+```bash
+git clone https://github.com/kumarrajapuvvalla-bit/ops-platform.git
+cd ops-platform
+docker-compose up -d
+
+# ✔ Grafana dashboard: http://localhost:3000  (admin/admin)
+# ✔ Prometheus:        http://localhost:9090
+# ✔ Fleet metrics:     http://localhost:8000/metrics
+```
+
+The full observability stack starts in under 2 minutes with zero AWS credentials.
+Grafana auto-provisions the Fleet Operations dashboard on first boot.
+
+---
+
 ## Architecture Overview
 
 ```mermaid
@@ -39,8 +56,10 @@ graph LR
         DD["Datadog\nP0 Monitors"]
     end
 
-    subgraph Helm["Helm Chart"]
-        HC["ops-platform\nhelm/ops-platform/"]
+    subgraph Security["Security Layers"]
+        OPA["OPA Policies\nAdmission Control"]
+        SBOM["SBOM\nSyft + Grype"]
+        DEP["Dependabot\nAuto-updates"]
     end
 
     GL -->|"builds + deploys"| EKS
@@ -55,7 +74,7 @@ graph LR
     PROM --> GRAF
     OP -->|"watches + heals"| EKS
     OP -->|"FlightRoute CRD"| CRD
-    HC -->|"deploys to"| EKS
+    OPA -->|"admission control"| EKS
     ANS -->|"bootstraps nodes"| EKS
 ```
 
@@ -69,9 +88,11 @@ graph LR
 | GitLab CI/CD Pipeline | YAML | `.gitlab-ci.yml` | 10-stage pipeline: lint → test → synth → scan → build → package → dev → integration → prod → notify |
 | Ansible | YAML + Python | `ansible/` | EKS node bootstrap, CIS L1 hardening, Datadog + node_exporter installation |
 | Helm Chart | YAML | `helm/ops-platform/` | Kubernetes packaging for both services with HPA, PDB, ServiceMonitor |
-| Observability | YAML + JSON | `observability/` | Prometheus alert rules, Grafana dashboards, Datadog monitor definitions |
+| OPA Policies | Rego | `policies/` | Admission control: resource limits, non-root, required labels |
+| Observability | YAML + JSON | `observability/` | Prometheus alerts, SLO definitions, Grafana dashboards, Datadog monitors |
 | Runbooks | Markdown | `runbooks/` | Structured P0/P1 incident response procedures |
 | Postmortems | Markdown | `postmortems/` | Blameless postmortems with UTC timelines and action items |
+| ADRs | Markdown | `docs/adr/` | Architecture Decision Records for key technical choices |
 
 ## Tech Stack
 
@@ -84,6 +105,8 @@ graph LR
 | CI/CD | GitLab CI/CD (10 stages) |
 | Configuration Management | Ansible |
 | Observability | Prometheus, Grafana, Datadog |
+| Policy-as-Code | OPA / Gatekeeper (Rego) |
+| Supply Chain Security | Syft (SBOM), Trivy, Dependabot |
 | Languages | Python 3.11, Go 1.22 |
 | Operator Framework | controller-runtime v0.17.0 |
 | Container Base | python:3.11-slim (exporter), gcr.io/distroless/static (operator) |
@@ -92,94 +115,50 @@ graph LR
 
 ### Prerequisites
 
-- Docker 24+
-- Python 3.11+
-- Go 1.22+
-- Node.js 20+ (for CDK)
-- AWS CLI configured
-- `kubectl` + `minikube` (for operator)
-- `helm` 3.12+
+- Docker 24+, Python 3.11+, Go 1.22+, Node.js 20+
+- `kubectl` + `minikube`, `helm` 3.12+
 
-### Run the Fleet Health Exporter with Docker
+### Full observability stack (recommended first step)
 
 ```bash
-cd exporter
+docker-compose up -d
+# Grafana auto-provisions Prometheus datasource + Fleet Operations dashboard
+```
 
-# Build the image
-docker build -t fleet-exporter:local .
+### Run the Fleet Health Exporter standalone
 
-# Run locally (metrics on port 8000)
-docker run --rm -p 8000:8000 \
-  -e ENVIRONMENT=dev \
-  -e SCRAPE_INTERVAL=30 \
-  fleet-exporter:local
-
-# Check metrics
+```bash
+cd exporter && docker build -t fleet-exporter:local .
+docker run --rm -p 8000:8000 -e ENVIRONMENT=dev fleet-exporter:local
 curl http://localhost:8000/metrics | grep fleet_readiness
 ```
 
 ### Run the Operator with minikube
 
 ```bash
-# Start a local cluster
 minikube start --kubernetes-version=v1.29.0
-
-# Install the CRD
 kubectl apply -f operator/config/crd/flightroute_crd.yaml
-
-# Apply RBAC
 kubectl apply -f operator/config/rbac/role.yaml
-
-# Run the operator locally (uses current kubeconfig)
-cd operator
-go run main.go
-
-# In a separate terminal, create a FlightRoute
-kubectl apply -f - <<EOF
-apiVersion: ops.kumarrajapuvvalla-bit.github.io/v1
-kind: FlightRoute
-metadata:
-  name: lhr-jfk
-spec:
-  routeCode: LHR-JFK
-  targetDeployment: booking-service
-  minReplicas: 3
-  sloTarget: 99.9
-EOF
+cd operator && go run main.go
 ```
 
-### CDK Synth (preview CloudFormation without deploying)
+### CDK Synth (no AWS needed)
 
 ```bash
 cd infrastructure
-
-# Install dependencies
-pip install -r requirements.txt
-npm install -g aws-cdk
-
-# Preview all stacks (no AWS credentials needed for synth)
-cdk synth \
-  --context environment=dev \
-  --context account=123456789012 \
-  --context region=eu-west-2
-
-# Run CDK assertion tests
+pip install -r requirements.txt && npm install -g aws-cdk
+cdk synth --context environment=dev --context account=123456789012 --context region=eu-west-2
 pytest tests/ -v
 ```
 
-### Run Python unit tests
+## Further Reading
 
-```bash
-pip install -r exporter/requirements.txt
-pytest exporter/tests/ -v
-```
-
-### Run Go tests
-
-```bash
-cd operator
-go test ./... -v -race
-```
+- 📐 [Architecture Deep Dive](docs/ARCHITECTURE.md) — data flows, state machines, cost estimates
+- 📝 [Architecture Decision Records](docs/adr/README.md) — why CDK, distroless, controller-runtime
+- 🔒 [OPA Policies](policies/README.md) — admission control closing the INC-001 loop
+- 📈 [SLO Definitions](observability/slo/slo-definitions.yaml) — formal SLI/SLO as code
+- 📝 [CHANGELOG](CHANGELOG.md) — version history
+- 🤝 [Contributing Guide](CONTRIBUTING.md) — dev setup, commit convention, PR process
 
 ## How This Maps to a Senior DevOps / SRE Engineer Role
 
@@ -190,25 +169,27 @@ operations platforms.
 | Skill Area | Implementation in This Repo |
 |------------|-----------------------------|
 | AWS (EKS, ECS/Fargate, ALB) | `infrastructure/stacks/eks_stack.py`, `fargate_stack.py` |
-| Infrastructure as Code | Python AWS CDK in `infrastructure/` — same IaC principles as Terraform, different DSL |
-| Kubernetes operations | `operator/` — custom controller-runtime operator; `helm/` — Helm chart with HPA + PDB |
+| Infrastructure as Code | Python AWS CDK in `infrastructure/` — same IaC principles as Terraform |
+| Kubernetes operations | `operator/` — custom controller-runtime operator; `helm/` — HPA + PDB |
 | Helm | `helm/ops-platform/` with templates, values, HPA, PDB, ServiceMonitor |
 | GitLab CI/CD | `.gitlab-ci.yml` — 10-stage pipeline with OIDC, Trivy, manual prod gate |
 | Ansible | `ansible/playbooks/` — node bootstrap, CIS hardening, Datadog agent install |
 | Datadog | `exporter/datadog_bridge.py`, `observability/datadog/monitors/` |
-| Prometheus + Grafana | `observability/prometheus/alerts/`, `observability/grafana/dashboards/` |
-| Python scripting | `exporter/fleet_exporter.py`, `health_calculator.py`, CDK stacks in `infrastructure/` |
-| Go development | `operator/` — full Kubernetes operator in Go using controller-runtime |
+| Prometheus + Grafana | `observability/prometheus/alerts/`, `observability/grafana/` |
+| Python scripting | `exporter/fleet_exporter.py`, `health_calculator.py`, CDK stacks |
+| Go development | `operator/` — full Kubernetes operator in Go |
+| SLO / SRE practices | `observability/slo/slo-definitions.yaml`, Fleet Readiness Score |
+| Policy-as-Code | `policies/k8s/*.rego` — OPA admission control |
+| Supply chain security | SBOM workflow, Dependabot, Trivy, `.github/workflows/sbom.yml` |
 | 24/7 incident response | `runbooks/` — 4 runbooks; `postmortems/` — INC-001 with UTC timeline |
-| SLO / SRE practices | Fleet Readiness Score, `observability/prometheus/alerts/fleet_slo.yml` |
-| Security / DevSecOps | Trivy in CI, Checkov on CDK, CIS hardening playbook, distroless operator image |
+| Security / DevSecOps | CIS hardening, distroless image, non-root, no wildcards in IAM |
 | Kubernetes CRDs / operators | `FlightRoute` CRD with full reconciliation loop and self-healing |
+| Architecture decisions | `docs/adr/` — 3 ADRs with context, decision, consequences |
 
 ## Disclaimer
 
 This is a **portfolio and educational project**. All code is original and written
 for learning and demonstration purposes only. No proprietary code, credentials,
 customer data, or confidential information from any employer or company has been
-used. The aviation domain is used purely as a realistic technical context to make
-the project concrete. This project is not affiliated with or endorsed by any real
-company or organisation.
+used. The aviation domain is used purely as a realistic technical context.
+This project is not affiliated with or endorsed by any real company or organisation.
