@@ -1,0 +1,123 @@
+# ops-platform — Local Development Stack
+#
+# Spins up the full observability stack locally in < 2 minutes.
+# No AWS credentials required.
+#
+# Usage:
+#   docker-compose up -d
+#   open http://localhost:3000       # Grafana (admin / admin)
+#   open http://localhost:9090       # Prometheus
+#   open http://localhost:8000/metrics  # Fleet Exporter raw metrics
+#
+# Stop:
+#   docker-compose down
+
+version: '3.9'
+
+networks:
+  ops-net:
+    driver: bridge
+
+volumes:
+  prometheus-data:
+  grafana-data:
+
+services:
+
+  # ── Fleet Health Exporter ───────────────────────────────────────
+  fleet-exporter:
+    build:
+      context: ./exporter
+      dockerfile: Dockerfile
+    container_name: fleet-exporter
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=local
+      - METRICS_PORT=8000
+      - SCRAPE_INTERVAL=30
+      # AWS credentials for real polling (optional — exporter degrades gracefully)
+      - AWS_REGION=${AWS_REGION:-eu-west-2}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - EKS_CLUSTER_NAME=${EKS_CLUSTER_NAME:-ops-platform-dev}
+    networks:
+      - ops-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/metrics')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    labels:
+      - "ops-platform.component=exporter"
+      - "ops-platform.language=python"
+
+  # ── Prometheus ────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus/alerts:/etc/prometheus/alerts:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+      - '--log.level=info'
+    networks:
+      - ops-net
+    depends_on:
+      fleet-exporter:
+        condition: service_healthy
+    labels:
+      - "ops-platform.component=prometheus"
+
+  # ── Grafana ────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_INSTALL_PLUGINS=
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+    networks:
+      - ops-net
+    depends_on:
+      - prometheus
+    labels:
+      - "ops-platform.component=grafana"
+
+  # ── Alert Manager (optional — comment out if not needed) ──────────
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: alertmanager
+    restart: unless-stopped
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--log.level=info'
+    networks:
+      - ops-net
+    labels:
+      - "ops-platform.component=alertmanager"

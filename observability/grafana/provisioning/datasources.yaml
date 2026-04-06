@@ -1,0 +1,20 @@
+# Grafana datasource provisioning
+# Automatically configures the Prometheus datasource on startup.
+# No manual setup required after docker-compose up.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus-local
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      httpMethod: POST
+      timeInterval: 15s
+      queryTimeout: 60s
+      exemplarTraceIdDestinations: []
+    version: 1
