@@ -1,0 +1,90 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: flightroutes.ops.kumarrajapuvvalla-bit.github.io
+spec:
+  group: ops.kumarrajapuvvalla-bit.github.io
+  names:
+    kind: FlightRoute
+    listKind: FlightRouteList
+    plural: flightroutes
+    singular: flightroute
+    shortNames:
+      - fr
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [routeCode, targetDeployment, minReplicas, sloTarget]
+              properties:
+                routeCode:
+                  type: string
+                  pattern: '^[A-Z]{3}-[A-Z]{3}$'
+                  description: IATA route code e.g. LHR-JFK
+                targetDeployment:
+                  type: string
+                  description: Name of the Deployment to watch and heal
+                minReplicas:
+                  type: integer
+                  minimum: 1
+                  description: Minimum replicas the operator will enforce
+                sloTarget:
+                  type: number
+                  minimum: 0
+                  maximum: 100
+                  description: SLO availability target as a percentage
+                healingEnabled:
+                  type: boolean
+                  default: true
+                  description: Set false to observe only (no auto-scaling)
+            status:
+              type: object
+              properties:
+                currentReplicas:
+                  type: integer
+                lastHealedAt:
+                  type: string
+                  format: date-time
+                healingCount:
+                  type: integer
+                  format: int64
+                sloCompliant:
+                  type: boolean
+      additionalPrinterColumns:
+        - name: Route
+          type: string
+          jsonPath: .spec.routeCode
+        - name: MinReplicas
+          type: integer
+          jsonPath: .spec.minReplicas
+        - name: Current
+          type: integer
+          jsonPath: .status.currentReplicas
+        - name: SLO
+          type: number
+          jsonPath: .spec.sloTarget
+        - name: Healed
+          type: integer
+          jsonPath: .status.healingCount
+      subresources:
+        status: {}
+---
+# Example FlightRoute resource
+apiVersion: ops.kumarrajapuvvalla-bit.github.io/v1
+kind: FlightRoute
+metadata:
+  name: lhr-jfk
+  namespace: default
+spec:
+  routeCode: LHR-JFK
+  targetDeployment: booking-service
+  minReplicas: 3
+  sloTarget: 99.9
+  healingEnabled: true

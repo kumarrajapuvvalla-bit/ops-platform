@@ -1,0 +1,43 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ops-platform-operator-role
+rules:
+  # FlightRoute CRD — full CRUD
+  - apiGroups: ["ops.kumarrajapuvvalla-bit.github.io"]
+    resources: ["flightroutes"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["ops.kumarrajapuvvalla-bit.github.io"]
+    resources: ["flightroutes/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["ops.kumarrajapuvvalla-bit.github.io"]
+    resources: ["flightroutes/finalizers"]
+    verbs: ["update"]
+
+  # Deployments — read and scale only (least privilege)
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+
+  # Events — create and patch for audit trail
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+
+  # Leader election
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ops-platform-operator-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ops-platform-operator-role
+subjects:
+  - kind: ServiceAccount
+    name: ops-platform-operator
+    namespace: ops-platform
