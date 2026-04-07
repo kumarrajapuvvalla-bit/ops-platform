@@ -1,15 +1,9 @@
-"""test_datadog_bridge.py — Unit tests for DatadogBridge
-
-Tests the DatadogBridge class without requiring datadog-api-client
-to be installed in CI. All external calls are mocked via
-unittest.mock so no real Datadog API credentials are needed.
-"""
+"""test_datadog_bridge.py — Unit tests for DatadogBridge"""
 
 import sys
 import os
-import json
 import logging
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -28,7 +22,6 @@ class TestDatadogBridge:
                 result = bridge.forward_p0_metric(
                     "fleet.readiness.breach", 61.0, ["env:prod"]
                 )
-        # Should not raise, should return False (no API key = disabled)
         assert result is False
 
     def test_push_p0_metric_returns_false_when_disabled(self):
@@ -43,11 +36,8 @@ class TestDatadogBridge:
         """forward_p0_metric should not push when score >= 80 (not a P0)."""
         with patch.dict(os.environ, {"DATADOG_API_KEY": "fake-key"}, clear=False):
             bridge = DatadogBridge()
-            # Patch the internal send so no real HTTP call is made
             with patch.object(bridge, "_send_to_datadog", return_value=True) as mock_send:
-                # score=85 is above threshold, should not call _send
                 result = bridge.forward_p0_metric("fleet.score", 85.0, ["env:prod"])
-        # If above threshold, bridge returns False (no breach to report)
         assert result is False
         mock_send.assert_not_called()
 

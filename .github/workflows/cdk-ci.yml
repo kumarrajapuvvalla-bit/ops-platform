@@ -36,19 +36,19 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: CDK Synth (validates all stacks without deploying)
+      - name: CDK Synth (validates all stacks without AWS credentials)
         run: |
           cdk synth \
             --context environment=dev \
             --context account=123456789012 \
             --context region=eu-west-2 \
             --require-approval never \
+            --no-lookups \
             --quiet
         env:
-          # CDK_DEFAULT_ACCOUNT and CDK_DEFAULT_REGION are needed for synth
           CDK_DEFAULT_ACCOUNT: '123456789012'
           CDK_DEFAULT_REGION: 'eu-west-2'
           AWS_DEFAULT_REGION: 'eu-west-2'
 
       - name: Confirm synth succeeded
-        run: echo "CDK synth passed — all stacks are valid CloudFormation"
+        run: echo "CDK synth passed — all stacks generate valid CloudFormation"
