@@ -59,7 +59,7 @@ jobs:
           artifact-name: sbom-operator
 
       - name: Scan SBOM for vulnerabilities (Grype)
-        uses: anchore/scan-action@v3
+        uses: anchore/scan-action@v7
         with:
           sbom: sbom-operator-${{ github.ref_name }}.spdx.json
           fail-build: false  # Report only, do not block release
