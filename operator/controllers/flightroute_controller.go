@@ -7,9 +7,7 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
@@ -33,7 +31,6 @@ type FlightRouteReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
 // Reconcile is the core controller-runtime reconciliation loop.
-// It is called whenever a FlightRoute or its watched Deployment changes.
 func (r *FlightRouteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
@@ -41,7 +38,6 @@ func (r *FlightRouteReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	var flightRoute opsv1.FlightRoute
 	if err := r.Get(ctx, req.NamespacedName, &flightRoute); err != nil {
 		if errors.IsNotFound(err) {
-			// Resource deleted — nothing to do
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("get FlightRoute: %w", err)
@@ -60,7 +56,7 @@ func (r *FlightRouteReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 	if err := r.Get(ctx, deploymentKey, &deployment); err != nil {
 		if errors.IsNotFound(err) {
-			logger.Info("Target deployment not found — requeuing",
+			logger.Info("Target deployment not found — requeueing",
 				"deployment", flightRoute.Spec.TargetDeployment,
 			)
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
