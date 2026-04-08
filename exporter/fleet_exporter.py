@@ -4,7 +4,7 @@ A custom Prometheus exporter that watches AWS infrastructure the way an
 airline watches its fleet — every resource has a health status, cost burn
 rate, and SLO compliance score.
 
-Metrics exposed at :9090/metrics
+Metrics exposed at :8000/metrics
 
 Requires:
     pip install boto3 prometheus_client datadog-api-client
@@ -18,8 +18,7 @@ from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
-from prometheus_client import Gauge, start_http_server, REGISTRY
-from prometheus_client.core import CollectorRegistry
+from prometheus_client import Gauge, start_http_server
 
 from health_calculator import HealthCalculator
 from datadog_bridge import DatadogBridge
@@ -31,14 +30,14 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# ── Configuration ──────────────────────────────────────────────────────────
+# ── Configuration ───────────────────────────────────────────────────────────
 AWS_REGION = os.getenv("AWS_REGION", "eu-west-2")
 SCRAPE_INTERVAL = int(os.getenv("SCRAPE_INTERVAL", "60"))
-METRICS_PORT = int(os.getenv("METRICS_PORT", "9090"))
+METRICS_PORT = int(os.getenv("METRICS_PORT", "8000"))
 ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
 CLUSTER_NAME = os.getenv("EKS_CLUSTER_NAME", "ops-platform")
 
-# ── Prometheus Metrics ─────────────────────────────────────────────────────
+# ── Prometheus Metrics ──────────────────────────────────────────────────────
 FLEET_READINESS_SCORE = Gauge(
     "fleet_readiness_score",
     "Overall fleet readiness score (0-100), analogous to airline dispatch reliability",
@@ -91,7 +90,7 @@ class FleetExporter:
         self.calculator = HealthCalculator()
         self.datadog = DatadogBridge()
 
-    # ── EKS ────────────────────────────────────────────────────────────────
+    # ── EKS ──────────────────────────────────────────────────────────────────
 
     def collect_eks_health(self) -> dict[str, Any]:
         """Poll EKS node groups and compute healthy node ratios."""
@@ -104,7 +103,6 @@ class FleetExporter:
                         clusterName=self.cluster_name, nodegroupName=ng_name
                     )["nodegroup"]
                     desired = ng["scalingConfig"]["desiredSize"]
-                    # Count nodes in ACTIVE status via health field
                     healthy = ng.get("health", {}).get("issues") == [] and desired > 0
                     ratio = 1.0 if healthy else 0.5
                     EKS_NODE_HEALTH.labels(
@@ -118,7 +116,7 @@ class FleetExporter:
             log.warning("EKS health collection failed: %s", exc)
         return metrics
 
-    # ── ECS ────────────────────────────────────────────────────────────────
+    # ── ECS ──────────────────────────────────────────────────────────────────
 
     def collect_ecs_health(self) -> dict[str, float]:
         """Poll ECS services and compute running/desired task ratios."""
@@ -148,7 +146,7 @@ class FleetExporter:
             log.warning("ECS health collection failed: %s", exc)
         return metrics
 
-    # ── ALB ────────────────────────────────────────────────────────────────
+    # ── ALB ──────────────────────────────────────────────────────────────────
 
     def collect_alb_health(self) -> dict[str, float]:
         """Poll ALB target group health."""
@@ -176,7 +174,7 @@ class FleetExporter:
             log.warning("ALB health collection failed: %s", exc)
         return metrics
 
-    # ── RDS ────────────────────────────────────────────────────────────────
+    # ── RDS ──────────────────────────────────────────────────────────────────
 
     def collect_rds_health(self) -> dict[str, float]:
         """Poll RDS connection utilisation via CloudWatch."""
@@ -207,7 +205,7 @@ class FleetExporter:
             log.warning("RDS health collection failed: %s", exc)
         return metrics
 
-    # ── Main collection loop ───────────────────────────────────────────────
+    # ── Main collection loop ────────────────────────────────────────────────
 
     def collect_all(self) -> None:
         """Run a full collection cycle and update the Fleet Readiness Score."""
@@ -232,7 +230,6 @@ class FleetExporter:
 
         log.info("Fleet Readiness Score: %.1f / 100", score)
 
-        # Push critical breaches to Datadog
         if score < 95.0:
             self.datadog.push_p0_metric(
                 metric_name="ops_platform.fleet.readiness_score",
