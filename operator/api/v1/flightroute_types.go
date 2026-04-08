@@ -14,11 +14,8 @@ var GroupVersion = schema.GroupVersion{
 }
 
 var (
-	// SchemeBuilder is used to add functions to this group's scheme
 	SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion}
-
-	// AddToScheme adds the types in this group-version to the given scheme
-	AddToScheme = SchemeBuilder.AddToScheme
+	AddToScheme   = SchemeBuilder.AddToScheme
 )
 
 func init() {
@@ -27,26 +24,22 @@ func init() {
 
 // FlightRouteSpec defines the desired state of FlightRoute
 type FlightRouteSpec struct {
-	// RouteName is the IATA flight route code (e.g. "LHR-JFK")
-	// +kubebuilder:validation:Pattern=`^[A-Z]{3}-[A-Z]{3}$`
-	RouteName string `json:"routeName"`
+	// RouteCode is the IATA flight route code (e.g. "LHR-JFK")
+	RouteCode string `json:"routeCode"`
 
 	// MinReplicas is the minimum number of pods the backing Deployment must maintain
 	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=20
 	MinReplicas int32 `json:"minReplicas"`
 
 	// SloTarget is the availability SLO percentage (e.g. 99.9)
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=100
 	SloTarget float64 `json:"sloTarget"`
 
-	// BackingDeployment is the name of the Deployment this FlightRoute controls
-	BackingDeployment string `json:"backingDeployment"`
+	// TargetDeployment is the name of the Deployment this FlightRoute controls
+	TargetDeployment string `json:"targetDeployment"`
 
 	// HealingEnabled controls whether the operator will auto-scale the deployment.
-	// +kubebuilder:default=true
-	HealingEnabled bool `json:"healingEnabled,omitempty"`
+	// +optional
+	HealingEnabled *bool `json:"healingEnabled,omitempty"`
 }
 
 // FlightRouteStatus defines the observed state of FlightRoute
@@ -58,8 +51,8 @@ type FlightRouteStatus struct {
 	// +optional
 	LastHealedAt *metav1.Time `json:"lastHealedAt,omitempty"`
 
-	// HealCount is the total number of times this route has been auto-healed
-	HealCount int32 `json:"healCount,omitempty"`
+	// HealingCount is the total number of times this route has been auto-healed
+	HealingCount int32 `json:"healingCount,omitempty"`
 
 	// Conditions stores standard Kubernetes conditions for the FlightRoute
 	// +optional
@@ -71,10 +64,9 @@ type FlightRouteStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="Route",type=string,JSONPath=`.spec.routeName`
+// +kubebuilder:printcolumn:name="Route",type=string,JSONPath=`.spec.routeCode`
 // +kubebuilder:printcolumn:name="MinReplicas",type=integer,JSONPath=`.spec.minReplicas`
-// +kubebuilder:printcolumn:name="HealCount",type=integer,JSONPath=`.status.healCount`
-// +kubebuilder:printcolumn:name="SLO",type=number,JSONPath=`.spec.sloTarget`
+// +kubebuilder:printcolumn:name="HealCount",type=integer,JSONPath=`.status.healingCount`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // FlightRoute is the Schema for the flightroutes API
