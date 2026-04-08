@@ -3,8 +3,27 @@ package v1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/scheme"
 )
+
+// GroupVersion is group version used to register these objects
+var GroupVersion = schema.GroupVersion{
+	Group:   "ops.kumarrajapuvvalla-bit.github.io",
+	Version: "v1",
+}
+
+var (
+	// SchemeBuilder is used to add functions to this group's scheme
+	SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion}
+
+	// AddToScheme adds the types in this group-version to the given scheme
+	AddToScheme = SchemeBuilder.AddToScheme
+)
+
+func init() {
+	SchemeBuilder.Register(&FlightRoute{}, &FlightRouteList{})
+}
 
 // FlightRouteSpec defines the desired state of FlightRoute
 type FlightRouteSpec struct {
@@ -26,7 +45,6 @@ type FlightRouteSpec struct {
 	BackingDeployment string `json:"backingDeployment"`
 
 	// HealingEnabled controls whether the operator will auto-scale the deployment.
-	// Defaults to true.
 	// +kubebuilder:default=true
 	HealingEnabled bool `json:"healingEnabled,omitempty"`
 }
@@ -69,7 +87,6 @@ type FlightRoute struct {
 }
 
 // DeepCopyObject implements runtime.Object.
-// Required by SchemeBuilder.Register.
 func (in *FlightRoute) DeepCopyObject() runtime.Object {
 	out := new(FlightRoute)
 	*out = *in
@@ -86,27 +103,8 @@ type FlightRouteList struct {
 }
 
 // DeepCopyObject implements runtime.Object.
-// Required by SchemeBuilder.Register.
 func (in *FlightRouteList) DeepCopyObject() runtime.Object {
 	out := new(FlightRouteList)
 	*out = *in
 	return out
-}
-
-// SchemeGroupVersion is the group and version used in this package
-var SchemeGroupVersion = GroupVersion
-
-var (
-	// GroupVersion is group version used to register these objects
-	GroupVersion = SchemeGroupVersion
-
-	// SchemeBuilder is used to add functions to this group's scheme
-	SchemeBuilder = &scheme.Builder{GroupVersion: SchemeGroupVersion}
-
-	// AddToScheme adds the types in this group-version to the given scheme
-	AddToScheme = SchemeBuilder.AddToScheme
-)
-
-func init() {
-	SchemeBuilder.Register(&FlightRoute{}, &FlightRouteList{})
 }
