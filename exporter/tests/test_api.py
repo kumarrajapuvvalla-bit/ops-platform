@@ -1,4 +1,3 @@
-import pytest
 from fastapi.testclient import TestClient
 from api_server import app, update_latest_score
 

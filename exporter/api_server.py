@@ -21,7 +21,7 @@ import time
 import uuid
 from typing import Optional
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, status
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from pydantic import BaseModel, Field
@@ -149,7 +149,6 @@ async def health():
 @app.get("/readyz", tags=["ops"])
 async def ready():
     age = int(time.time()) - _latest["collected_at"]
-    # Unready if no score has been collected in the last 3 scrape intervals
     if _latest["collected_at"] > 0 and age > 180:
         raise HTTPException(status_code=503, detail=f"Last collection {age}s ago")
     return {"status": "ready", "last_collection_age_seconds": age}
@@ -213,7 +212,6 @@ async def get_fleet_score_v2(
     score = _latest["score"]
     degraded = _latest["degraded_services"]
 
-    # Auto-generate recommendations based on degraded services
     recommendations: list[str] = []
     if score < 95.0:
         recommendations.append("Check EKS node group health: kubectl get nodes")
