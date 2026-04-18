@@ -5,7 +5,7 @@
 #           minimal attack surface, non-root by default
 
 # ── Stage 1: Builder ──────────────────────────────────────────────────────
-FROM golang:1.22 AS builder
+FROM golang:1.26 AS builder
 
 WORKDIR /workspace
 
